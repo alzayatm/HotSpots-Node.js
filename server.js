@@ -5,6 +5,8 @@ var mysql = require('mysql');
 var bodyParser = require('body-parser');
 var jwt = require('jsonwebtoken');
 var expressJWT = require('express-jwt');
+var http = require('http');
+var https = require('https');
 var port = process.env.PORT || 3000; 
 
 // Express
@@ -45,32 +47,62 @@ app.post('/register', function(req, res) {
 // User updates location in form of lat and long 
 app.post('/updatelocation', function(req, res) {
    
-    var coordinate = {
-        latitude: req.body.latitude, 
-        longitude: req.body.longitude
-    }
-
-    console.log("Latitude = " + coordinate.latitude); 
-    console.log("Longitude = " + coordinate.longitude);
-    var locationExistsInTable = false 
-    res.send('Received lat and long');
-    /*
-    connection.query("", function(err, rows, fields) {
+    // Debugging purposes 
+    console.log("Latitude = " + req.body.latitude); 
+    console.log("Longitude = " + req.body.longitude);
+    
+    var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 8;";
+    
+    connection.query(queryClosestLocation , function(err, rows, fields) {
+        console.log("Error: " + err);
+        console.log("Rows from table: " + rows.length);
 
         if(err == null && rows.length > 0) {
-            locations = true 
-        }
-    }); 
-
-    if(locationExistsInTable) {
-        // Query the db, updating that there's a person at that particular location 
-    } else {
-        // Make request to google api to add location to table 
-        // Add the individual to that location after the location is pulled from the google api 
-    }
+            // The location exists in the table
+            // Add the user to that location
+            if(rows.length > 1) {
+                connection.query("SELECT * FROM users;", function(err, rows, fields) {
+                    console.log('hello');
+                    console.log(rows[0].UUID);
+                });
+            }
 
     
-    */ 
+        } else  {
+            // Make request to google api to add location to table 
+            // Add the individual to that location after the location is pulled from the google api 
+            console.log("Going to make an api call to google");
+            //var data = "";
+            var json = "";
+            var options = {
+                method: "GET",
+                host: "maps.googleapis.com", 
+                port: 443, 
+                headers: {'Content-Type': 'application/json'}, 
+                path: "/maps/api/place/nearbysearch/json?location=" + req.body.latitude + "," +  req.body.longitude + "&radius=100&types=airport|amusement_park|aquarium|art_gallery|bakery|bank|bar|beauty_salon|bicycle_store|book_store|bowling_alley|bus_station|cafe|campground|car_dealer|car_repair|casino|church|city_hall|clothing_store|convenience_store|courthouse|department_store|electrician|electronics_store|finance|florist|food|furniture_store|general_contractor|grocer_or_supermarket|gym|hair_care|hardware_store|hospital|jewelry_store|laundry|library|liquor_store|lodging|movie_theater|museum|night_club|painter|park|parking|pet_store|pharmacy|post_office|real_estate_agency|restaurant|rv_park|school|shoe_store|shopping_mall|spa|stadium|storage|store|subway_station|train_station|travel_agency|university|zoo&key=AIzaSyAOTY7mKKWTk4uuDlUJIvhk9w14O5kF9XI"
+            }
+            
+            var reqToGoogleAPI = https.request(options, (res) => {
+               console.log("Status code: " + res.statusCode);
+
+               res.on("data", (d) => {
+                    //process.stdout.write(d);
+                    json += d;
+               });
+               res.on("end", () => {
+                    var obj = JSON.parse(json);
+                    console.log( obj.results[0].name);
+               });
+            });
+            reqToGoogleAPI.end();
+        
+
+            reqToGoogleAPI.on("error", (e) => {
+                console.log(e);
+            });
+        }
+    }); 
+     
 });
 
 // Returns a list of hotspots around the users location
