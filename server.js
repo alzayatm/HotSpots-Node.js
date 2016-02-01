@@ -62,9 +62,13 @@ app.post('/register', function(req, res) {
     }
 });
 
+var count = 0; 
 // User updates location in form of lat and long 
 app.post('/updatelocation', function(req, res) {
-   
+    count++; 
+    
+    function queryForLocationAndAddUser() {
+    
     // Debugging purposes 
     console.log("Latitude = " + req.body.latitude); 
     console.log("Longitude = " + req.body.longitude);
@@ -88,8 +92,7 @@ app.post('/updatelocation', function(req, res) {
             });
             
         } else  {
-            // Make request to google api to add location to table 
-            // Add the individual to that location after the location is pulled from the google api 
+            // Make request to google api 
             console.log("Going to make an api call to google");
             //var data = "";
             var json = "";
@@ -122,16 +125,25 @@ app.post('/updatelocation', function(req, res) {
             reqToGoogleAPI.on("error", (e) => {
                 console.log(e);
             });
+            // Add the location to the locations table 
+
+            // Add the individual to that location after the location is pulled from the google api 
         }
     }); 
+}
+    if(count ==  1) 
+        queryForLocationAndAddUser();
+      else 
+        setTimeout(function() { count = 0; }, 1000);
+     
      
 });
 
 // Returns a list of hotspots around the users location
 app.get('/gethotspots', function(req, res) {
-    // Send a list of hotspots based on the users location
+    // Send a list of hotspots based on the users location, json format
     // Might need to send the desired amount of results 
-    // Might need to be a post request, sending user info and retrieving info 
+    // Might need to be a post/get request, sending user info and retrieving info 
 });
 
 
@@ -147,6 +159,10 @@ app.get('/search', function(req, res) {
 // Start server 
 app.listen(port);
 console.log("Rest demo listening on port: " + port);
+
+
+// Custom functions 
+
 
 
 /*
