@@ -31,16 +31,34 @@ app.post('/register', function(req, res) {
         res.status(400).send('Invalid credentials');
     } else {
         // Store UUID, gender, and age in database
+
+        
+
         connection.query("INSERT INTO users (gender, age, UUID) VALUES(\'" + req.body.gender + "\' , " + req.body.age + ", \'" + req.body.UUID + "\');" , function(err, rows, fields) {
-           
-            if(err != null) {
-                console.log(err);
-            }
+           if(err) throw err; 
+           var getUserIDQuery = "SELECT user_id FROM users WHERE UUID = \'" + req.body.UUID + "\';";
+           // "select uuid from users where user_id = 1;"
+           connection.query(getUserIDQuery, function(err, rows, fields) {
+                if(err) throw err; 
+                /*
+                console.log("length " + rows.length);
+                USERID = rows[0].user_id; 
+                console.log("The user ID is (1)" + USERID);
+                */ 
+
+                var userID = rows[0].user_id; 
+                console.log("user ID = " + userID);
+                var myToken = jwt.sign({ UUID: req.body.UUID, app: req.body.app }, '4949Now')
+                res.status(200).json({ token: myToken, ID: userID });
+           }); 
         });
     
+        /*
         // Create token for authentication 
+        console.log("the user ID is (2)" + USERID);
         var myToken = jwt.sign({ UUID: req.body.UUID, app: req.body.app }, '4949Now')
-        res.status(200).json({ token: myToken });
+        res.status(200).json({ token: myToken, ID: USERID });
+        */ 
     }
 });
 
@@ -50,24 +68,25 @@ app.post('/updatelocation', function(req, res) {
     // Debugging purposes 
     console.log("Latitude = " + req.body.latitude); 
     console.log("Longitude = " + req.body.longitude);
+    console.log("User ID = " + req.body.userID);
     
     var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 8;";
     
-    connection.query(queryClosestLocation , function(err, rows, fields) {
-        console.log("Error: " + err);
-        console.log("Rows from table: " + rows.length);
+    connection.query(queryClosestLocation, function(err, rows, fields) {
+        if(err) throw err; 
+        
+        // A location already exists in the table 
+        if(rows.length > 0) {
 
-        if(err == null && rows.length > 0) {
             // The location exists in the table
-            // Add the user to that location
-            if(rows.length > 1) {
-                connection.query("SELECT * FROM users;", function(err, rows, fields) {
-                    console.log('hello');
-                    console.log(rows[0].UUID);
-                });
-            }
-
-    
+            // Fetch the location id 
+            var locationID = rows[0].location_id; 
+            // Add the user to that location through the checkins table 
+            var addUserLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + locationID + ");"; 
+            connection.query(addUserLocationQuery, function(err, rows, fields) {
+                if(err) throw err; 
+            });
+            
         } else  {
             // Make request to google api to add location to table 
             // Add the individual to that location after the location is pulled from the google api 
@@ -79,8 +98,8 @@ app.post('/updatelocation', function(req, res) {
                 host: "maps.googleapis.com", 
                 port: 443, 
                 headers: {'Content-Type': 'application/json'}, 
-                path: "/maps/api/place/nearbysearch/json?location=" + req.body.latitude + "," +  req.body.longitude + "&radius=100&types=airport|amusement_park|aquarium|art_gallery|bakery|bank|bar|beauty_salon|bicycle_store|book_store|bowling_alley|bus_station|cafe|campground|car_dealer|car_repair|casino|church|city_hall|clothing_store|convenience_store|courthouse|department_store|electrician|electronics_store|finance|florist|food|furniture_store|general_contractor|grocer_or_supermarket|gym|hair_care|hardware_store|hospital|jewelry_store|laundry|library|liquor_store|lodging|movie_theater|museum|night_club|painter|park|parking|pet_store|pharmacy|post_office|real_estate_agency|restaurant|rv_park|school|shoe_store|shopping_mall|spa|stadium|storage|store|subway_station|train_station|travel_agency|university|zoo&key=AIzaSyAOTY7mKKWTk4uuDlUJIvhk9w14O5kF9XI"
-            }
+                path: "/maps/api/place/nearbysearch/json?location=" + req.body.latitude + "," +  req.body.longitude + "&radius=10&key=AIzaSyAOTY7mKKWTk4uuDlUJIvhk9w14O5kF9XI"
+            }; 
             
             var reqToGoogleAPI = https.request(options, (res) => {
                console.log("Status code: " + res.statusCode);
@@ -91,12 +110,15 @@ app.post('/updatelocation', function(req, res) {
                });
                res.on("end", () => {
                     var obj = JSON.parse(json);
-                    console.log( obj.results[0].name);
+                    for (var i = 0; i < obj.results.length; i++) {
+                        for (var j = 0; j < obj.results[i].types.length; j++) {
+                            console.log(obj.results[i].types[j]);
+                        }
+                    } 
                });
             });
             reqToGoogleAPI.end();
         
-
             reqToGoogleAPI.on("error", (e) => {
                 console.log(e);
             });
