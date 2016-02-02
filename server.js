@@ -67,6 +67,7 @@ var count = 0;
 app.post('/updatelocation', function(req, res) {
     count++; 
     
+    // must not use timeout, rather, query the checkins and make sure it's not the same request inserted 
     function queryForLocationAndAddUser() {
     
     // Debugging purposes 
@@ -74,7 +75,7 @@ app.post('/updatelocation', function(req, res) {
     console.log("Longitude = " + req.body.longitude);
     console.log("User ID = " + req.body.userID);
     
-    var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 8;";
+    var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 10;";
     
     connection.query(queryClosestLocation, function(err, rows, fields) {
         if(err) throw err; 
@@ -82,20 +83,19 @@ app.post('/updatelocation', function(req, res) {
         // A location already exists in the table 
         if(rows.length > 0) {
 
+            console.log("THIS LOCATION ALREADY EXISTS and the number of results is: " + rows.length);
             // The location exists in the table
             // Fetch the location id 
             var locationID = rows[0].location_id; 
             // Add the user to that location through the checkins table 
             var addUserLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + locationID + ");"; 
-            connection.query(addUserLocationQuery, function(err, rows, fields) {
-                if(err) throw err; 
-            });
+            connection.query(addUserLocationQuery, function(err, rows, fields) {  if(err) throw err;  });
             
         } else  {
             // Make request to google api 
             console.log("Going to make an api call to google");
-            //var data = "";
-            var json = "";
+            
+            
             var options = {
                 method: "GET",
                 host: "maps.googleapis.com", 
@@ -104,6 +104,8 @@ app.post('/updatelocation', function(req, res) {
                 path: "/maps/api/place/nearbysearch/json?location=" + req.body.latitude + "," +  req.body.longitude + "&radius=10&key=AIzaSyAOTY7mKKWTk4uuDlUJIvhk9w14O5kF9XI"
             }; 
             
+            var json = "";
+            var jsonObj;
             var reqToGoogleAPI = https.request(options, (res) => {
                console.log("Status code: " + res.statusCode);
 
@@ -112,12 +114,32 @@ app.post('/updatelocation', function(req, res) {
                     json += d;
                });
                res.on("end", () => {
-                    var obj = JSON.parse(json);
-                    for (var i = 0; i < obj.results.length; i++) {
-                        for (var j = 0; j < obj.results[i].types.length; j++) {
-                            console.log(obj.results[i].types[j]);
+                    jsonObj = JSON.parse(json);
+                    
+                    // Add the location to the locations table 
+                    for (var i = 0; i < jsonObj.results.length; i++) {
+                        for (var j = 0; j < jsonObj.results[i].types.length; j++) {
+                            console.log(jsonObj.results[i].name); 
+                            console.log(j + ": " + jsonObj.results[i].types[j]);
+
+                            var typeOfLocation = jsonObj.results[i].types[j]; 
+                            if(typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation && "political") {
+                                
+                                // Retrieve location info
+                                var longitude = jsonObj.results[i].geometry.location.lng; 
+                                var latitude = jsonObj.results[i].geometry.location.lat;
+                                var name = jsonObj.results[i].name.replace(/'+/g, ""); 
+
+                                console.log('the name of the business is ' + name);
+                                
+                                var addLocationQuery = "INSERT INTO locations (coordinates, name) VALUES(POINT(" + longitude + "," + latitude + "),\'" + name + "\');";
+                                connection.query(addLocationQuery, function(err, rows, fields) { if(err) throw err; }); 
+                                console.log("THE NEW LOCATION WAS ADDED SUCCESSFULLY");
+                                return; 
+                            }   
                         }
                     } 
+                    
                });
             });
             reqToGoogleAPI.end();
@@ -125,8 +147,8 @@ app.post('/updatelocation', function(req, res) {
             reqToGoogleAPI.on("error", (e) => {
                 console.log(e);
             });
-            // Add the location to the locations table 
-
+            
+           
             // Add the individual to that location after the location is pulled from the google api 
         }
     }); 
@@ -134,7 +156,7 @@ app.post('/updatelocation', function(req, res) {
     if(count ==  1) 
         queryForLocationAndAddUser();
       else 
-        setTimeout(function() { count = 0; }, 1000);
+        setTimeout(function() { count = 0; }, 500);
      
      
 });
@@ -159,10 +181,6 @@ app.get('/search', function(req, res) {
 // Start server 
 app.listen(port);
 console.log("Rest demo listening on port: " + port);
-
-
-// Custom functions 
-
 
 
 /*
