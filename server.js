@@ -31,9 +31,6 @@ app.post('/register', function(req, res) {
         res.status(400).send('Invalid credentials');
     } else {
         // Store UUID, gender, and age in database
-
-        
-
         connection.query("INSERT INTO users (gender, age, UUID) VALUES(\'" + req.body.gender + "\' , " + req.body.age + ", \'" + req.body.UUID + "\');" , function(err, rows, fields) {
            if(err) throw err; 
            var getUserIDQuery = "SELECT user_id FROM users WHERE UUID = \'" + req.body.UUID + "\';";
@@ -76,7 +73,6 @@ app.post('/updatelocation', function(req, res) {
     console.log("User ID = " + req.body.userID);
     
     var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 10;";
-    
     connection.query(queryClosestLocation, function(err, rows, fields) {
         if(err) throw err; 
         
@@ -88,8 +84,8 @@ app.post('/updatelocation', function(req, res) {
             // Fetch the location id 
             var locationID = rows[0].location_id; 
             // Add the user to that location through the checkins table 
-            var addUserLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + locationID + ");"; 
-            connection.query(addUserLocationQuery, function(err, rows, fields) {  if(err) throw err;  });
+            var addUserToLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + locationID + ");"; 
+            connection.query(addUserToLocationQuery, function(err, rows, fields) {  if(err) throw err;  });
             
         } else  {
             // Make request to google api 
@@ -123,7 +119,7 @@ app.post('/updatelocation', function(req, res) {
                             console.log(j + ": " + jsonObj.results[i].types[j]);
 
                             var typeOfLocation = jsonObj.results[i].types[j]; 
-                            if(typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation && "political") {
+                            if(typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation != "political") {
                                 
                                 // Retrieve location info
                                 var longitude = jsonObj.results[i].geometry.location.lng; 
@@ -135,6 +131,16 @@ app.post('/updatelocation', function(req, res) {
                                 var addLocationQuery = "INSERT INTO locations (coordinates, name) VALUES(POINT(" + longitude + "," + latitude + "),\'" + name + "\');";
                                 connection.query(addLocationQuery, function(err, rows, fields) { if(err) throw err; }); 
                                 console.log("THE NEW LOCATION WAS ADDED SUCCESSFULLY");
+
+                                var getLastRowID = "SELECT * FROM locations ORDER BY location_id DESC LIMIT 1";
+                                connection.query(getLastRowID, function(err, rows, fields) { 
+                                    if(err) throw err; 
+                                    console.log("number of rows: " + rows.length);
+                                    var lastLocationID = rows[0].location_id;
+                                    console.log("last location ID is " + lastLocationID);
+                                    var addUserToNewlyAddedLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + lastLocationID + ");";
+                                    connection.query(addUserToNewlyAddedLocationQuery, function(err, rows, fields) { if(err) throw err; });
+                                });
                                 return; 
                             }   
                         }
@@ -148,8 +154,6 @@ app.post('/updatelocation', function(req, res) {
                 console.log(e);
             });
             
-           
-            // Add the individual to that location after the location is pulled from the google api 
         }
     }); 
 }
@@ -180,7 +184,7 @@ app.get('/search', function(req, res) {
 
 // Start server 
 app.listen(port);
-console.log("Rest demo listening on port: " + port);
+console.log("HotSpots app listening on port: " + port);
 
 
 /*
