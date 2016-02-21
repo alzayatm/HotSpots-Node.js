@@ -34,7 +34,7 @@ app.post('/register', function(req, res) {
         connection.query("INSERT INTO users (gender, age, UUID) VALUES(\'" + req.body.gender + "\' , " + req.body.age + ", \'" + req.body.UUID + "\');" , function(err, rows, fields) {
            if(err) throw err; 
            var getUserIDQuery = "SELECT user_id FROM users WHERE UUID = \'" + req.body.UUID + "\';";
-           // "select uuid from users where user_id = 1;"
+           
            connection.query(getUserIDQuery, function(err, rows, fields) {
                 if(err) throw err; 
                 var userID = rows[0].user_id; 
@@ -46,121 +46,96 @@ app.post('/register', function(req, res) {
     }
 });
 
-
-app.post('/updatelocation', function(req, res) {
+app.post('/updateLocation', function(req, res) {
     
-    // Debugging purposes 
-    //console.log("Latitude = " + req.body.latitude); 
-    //console.log("Longitude = " + req.body.longitude);
-    //console.log("User ID = " + req.body.userID);
-
     var proceedToUpdateUsersLocation = true
-    //var stopFromUpdatingLocationMultipleTimesQuery = "SELECT * FROM checkins WHERE user_id = " + req.body.userID + " AND TIMESTAMPDIFF(SECOND, entered_at, current_timestamp) < 0.3 AND TIMESTAMPDIFF(SECOND, entered_at, current_timestamp) < 2;";   
-        connection.query("SELECT * FROM checkins WHERE user_id = " + req.body.userID + " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) < 2 ORDER BY user_id DESC LIMIT 1;", function(err, rows, fields) {
-        if(err) throw err; 
-        console.log("Number of rows in the table " + rows.length);
-        if(rows.length > 0) {
-            proceedToUpdateUsersLocation = false
+
+    var checkIfDuplicateQuery = "SELECT * FROM checkins WHERE user_id = " + req.body.userID + " AND TIMESTAMPDIFF(SECOND, entered_at, current_timestamp) < 5;";
+    connection.query(checkIfDuplicateQuery, function(err, rows, fields) {
+        if (err) throw err; 
+        /*
+        console.log("Update rows: "+ rows.length);
+        for(var i = 0; i < rows.length; i++) {
+            console.log(rows[i].checkin_id);
         }
+        */ 
+        if (rows.length > 0) proceedToUpdateUsersLocation = false; // A duplicate record exists, do not update table
 
-        console.log("Value of proceedToUpdateUsersLocation: " +  proceedToUpdateUsersLocation);
-    if(proceedToUpdateUsersLocation) {
+        if (proceedToUpdateUsersLocation) {
 
-    var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 20;";
-    connection.query(queryClosestLocation, function(err, rows, fields) {
-        if(err) throw err; 
-        
-        console.log("THIS LOCATION ALREADY EXISTS and the number of results is: " + rows.length);
-        // A location already exists in the table 
-        if(rows.length > 0) {
+            // Check if closest location exists in locations table 
+            var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 20;";
+            connection.query(queryClosestLocation, function(err, rows, fields) {
+                if (err) throw err; 
+                // If rows.length > 0, the location closest to the user exists in the table 
+                if (rows.length > 0) {
+                    // Retrieve the location ID 
+                    var locationID = rows[0].location_id; 
+                    // Make a query to add the user to that location 
+                    var addUserToLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + locationID + ");"; 
+                    connection.query(addUserToLocationQuery, function(err, rows, fields) { if (err) throw err; })
+                } else {
+                    // The location does not exist in the table, we make a call to google api for that location 
+                    var options = {
+                        method: "GET",
+                        host: "maps.googleapis.com", 
+                        port: 443, 
+                        headers: {'Content-Type': 'application/json'}, 
+                        path: "/maps/api/place/nearbysearch/json?location=" + req.body.latitude + "," +  req.body.longitude + "&radius=20&key=AIzaSyAOTY7mKKWTk4uuDlUJIvhk9w14O5kF9XI"
+                    };
 
-            // The location exists in the table
-            // Fetch the location id 
-            var locationID = rows[0].location_id; 
-            // Add the user to that location through the checkins table 
-            var addUserToLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + locationID + ");"; 
-            connection.query(addUserToLocationQuery, function(err, rows, fields) {  if(err) throw err;  });
-            
-        } else  {
-            // Make request to google api 
-            console.log("Going to make an api call to google");
-            
-            var options = {
-                method: "GET",
-                host: "maps.googleapis.com", 
-                port: 443, 
-                headers: {'Content-Type': 'application/json'}, 
-                path: "/maps/api/place/nearbysearch/json?location=" + req.body.latitude + "," +  req.body.longitude + "&radius=20&key=AIzaSyAOTY7mKKWTk4uuDlUJIvhk9w14O5kF9XI"
-            }; 
-            
-            var json = "";
-            var jsonObj;
-            var reqToGoogleAPI = https.request(options, (res) => {
-               console.log("Status code: " + res.statusCode);
+                    var data = ""; 
+                    var json; 
+                    var reqToGoogleApi = https.request(options, (res) => {
 
-               res.on("data", (d) => {
-                    json += d;
-               });
-               res.on("end", () => {
-                    jsonObj = JSON.parse(json);
-                    
-                    // Add the location to the locations table 
-                    for (var i = 0; i < jsonObj.results.length; i++) {
-                        for (var j = 0; j < jsonObj.results[i].types.length; j++) {
-                            console.log(jsonObj.results[i].name); 
-                            console.log(j + ": " + jsonObj.results[i].types[j]);
+                        res.on("data", (d) => {
+                            data += d; 
+                        }); 
 
-                            var typeOfLocation = jsonObj.results[i].types[j]; 
-                            if(typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation != "political") {
-                                
-                                // Retrieve location info
-                                var longitude = jsonObj.results[i].geometry.location.lng; 
-                                var latitude = jsonObj.results[i].geometry.location.lat;
-                                var name = jsonObj.results[i].name.replace(/'+/g, ""); 
+                        res.on("end", () => {
+                            json = JSON.parse(data); 
 
-                                console.log('the name of the business is ' + name);
-                                
-                                var addLocationQuery = "INSERT INTO locations (coordinates, name) VALUES(POINT(" + longitude + "," + latitude + "),\'" + name + "\');";
-                                connection.query(addLocationQuery, function(err, rows, fields) { if(err) throw err; }); 
-                                console.log("THE NEW LOCATION WAS ADDED SUCCESSFULLY");
+                            // Add the location retrieved from google's api to the locations table 
+                            for (var i = 0; i < json.results.length; i++) {
+                                for (var j = 0; j < json.results[i].types.length; j++) {
 
-                                var getLastRowID = "SELECT * FROM locations ORDER BY location_id DESC LIMIT 1";
-                                connection.query(getLastRowID, function(err, rows, fields) { 
-                                    if(err) throw err; 
-                                    console.log("number of rows: " + rows.length);
-                                    var lastLocationID = rows[0].location_id;
-                                    console.log("last location ID is " + lastLocationID);
-                                    var addUserToNewlyAddedLocationQuery = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + lastLocationID + ");";
-                                    connection.query(addUserToNewlyAddedLocationQuery, function(err, rows, fields) { if(err) throw err; });
-                                });
-                                return; 
-                            }   
-                        }
-                    } 
-                    
-               });
+                                    var typeOfLocation = json.results[i].types[j];
+                                    if (typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation != "political") {
+
+                                        var longitude = json.results[i].geometry.location.lng; 
+                                        var latitude = json.results[i].geometry.location.lat; 
+                                        var name = json.results[i].name.replace(/'+/g, ""); 
+
+                                        // Add the location query 
+                                        var addLocationQuery = "INSERT INTO locations (coordinates, name) VALUES(POINT(" + longitude + "," + latitude + "),\'" + name + "\');";
+                                        connection.query(addLocationQuery, function(err, rows, fields) { if (err) throw err; });
+
+                                        // Retrieve the ID of the location and add the user 
+                                        var getLastRowID = "SELECT * FROM locations ORDER BY location_id DESC LIMIT 1";
+                                        connection.query(getLastRowID, function(err, rows, fields) {
+                                            if (err) throw err; 
+                                            var lastLocationID = rows[0].location_id;
+                                            var addUserToLocation = "INSERT INTO checkins (user_id, location_id) VALUES(" + req.body.userID + "," + lastLocationID + ");";
+                                            connection.query(addUserToLocation, function(err, rows, fields) { if (err) throw err; }); 
+                                        });
+                                        return; 
+                                    }
+                                }
+                            }
+                        }); 
+                    }); 
+                    reqToGoogleApi.end(); 
+                    req.on("error", (e) => {
+                        console.log(e);
+                    }); 
+                }
             });
-            reqToGoogleAPI.end();
-        
-            reqToGoogleAPI.on("error", (e) => {
-                console.log(e);
-            });
-            
         }
-    }); 
-}
-   
-
-});
-});
-    
+    });
+}); 
 
 // Returns a list of hotspots around the users location
 app.post('/gethotspots', function(req, res) {
-    // Respond with a list of hotspots based on the users location, json format
-    // Might need to send the desired amount of results 
-    // use user search preference 
-    // Might need to be a post/get request, sending user info and retrieving info 
     
     // NE TOP RIGHT
     // SW BOTTOM LEFT
@@ -168,29 +143,79 @@ app.post('/gethotspots', function(req, res) {
     // Y IS LAT
     //console.log("NElat: " + req.body.NECoordLat + ", NElong: " + req.body.NECoordLong); // TOP RIGHT 
     //console.log("SWlat: " + req.body.SWCoordLat + ", SWlong: " + req.body.SWCoordLong); // LEFT BOTTOM
-    var jsonObj;
+
+ 
+    var jsonObject = {
+        "BusinessDetails" : []
+    };
+    // Retrieve locations within the visible map rect 
     var locationsWithinVisibleMapRectQuery = "SELECT * FROM locations WHERE Y(coordinates) > " + req.body.SWCoordLat + "AND Y(coordinates) < " + req.body.NECoordLat + "AND X(coordinates) > " + req.body.SWCoordLong + "AND X(coordinates) < " + req.body.NECoordLong + ";";
-
-    //var secondQuery = "select distinct locations.name, checkins.user_id, age, gender, checkins.entered_at from checkins, users, locations WHERE checkins.location_id = locations.location_id and entered_at >= DATE_SUB(NOW(), INTERVAL 60 MINUTE) AND checkins.user_id = users.user_id AND Y(coordinates) > " + req.body.SWCoordLat + "AND Y(coordinates) < " + req.body.NECoordLat + "AND X(coordinates) > " + req.body.SWCoordLong + "AND X(coordinates) < " + req.body.NECoordLong + ";";
-
     connection.query(locationsWithinVisibleMapRectQuery, function(err, rows, fields) {
-        if(err) throw err; 
-        /*
-        console.log(rows.length);
-        for(var i = 0; i < rows.length; i++) {
-            console.log(rows[i].name);
-        }
-        */ 
-        jsonObj = modules.createJSONObject(rows);
-        //res.send(jsonObj);
-    });
+        if (err) throw err; 
+        console.log("Locations in map: " + rows.length);
+        for (var i = 0; i < rows.length; i++) {
+            var businessName = rows[i].name;
+            console.log("I: " + i);
+            // Returns all checkins for a location within the last 10 minutes
+            var retrieveLocationsWithCheckinsQuery = "SELECT * FROM checkins WHERE location_id = " + rows[i].location_id +  " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) <= 10;"; 
+            connection.query(retrieveLocationsWithCheckinsQuery, function(err, rows, fields) {
+
+                var averageAge = 0; 
+                var numOfFemales = 0; 
+                var numOfMales = 0;
+                var numOfPeople = rows.length; 
+                var genderArray = [];
+                var ageArray = [];
     
-    // Return average age of each location
-    // Return number of people, number of girls/guys 
-    // Store info in an array of objects about each loc 
-    // Info about a location within the last 10 minutes 
+                //console.log("Check ins for each location: " + rows.length);
+                //console.log("Location number: " + i);
 
+                for (var j = 0; j < rows.length; j++) {
+                    console.log("J: " + j);
+                
+                    console.log("Check-in: " + j + " User id: " + rows[j].user_id +  " location_id: " + rows[j].location_id + " entered_at: " + rows[j].entered_at);
+                    
+                    var getAgeAndGenderQuery = "SELECT gender, age FROM users WHERE user_id = " + rows[j].user_id + ";"; 
+                    connection.query(getAgeAndGenderQuery, function(err, rows, fields) {
+                        if (err) throw err; 
+                        for (var z = 0; z < rows.length; z++) {
+                            //console.log("Z: " + z);
+                            numOfFemales = 0;  
+                            numOfMales = 0; 
+                            //console.log("Gender: " + rows[z].gender + " and Age: " + rows[z].age); 
+                            genderArray.push(rows[z].gender); 
+                            ageArray.push(rows[z].age); 
+                        }
 
+                        //console.log("gend length: " + genderArray.length);
+                        //console.log("age length: "  + ageArray.length);
+                        var sum = 0; 
+                        for (var a = 0; a < ageArray.length; a++) {
+                            //console.log( "Age array index : " +  a + " : " +  ageArray[a]);
+                            if (genderArray[a] == 'M') numOfMales++; 
+                            if (genderArray[a] == 'F') numOfFemales++; 
+                            sum += ageArray[a];
+                        }
+                        //console.log("Sum:" + sum);
+                        averageAge = (sum / ageArray.length); 
+
+                        //console.log("Total number of people: " + numOfPeople);
+                        //console.log("The average age is: " + averageAge); 
+                        //console.log("Males: " + numOfMales);
+                        //console.log("Females: " + numOfFemales); 
+                        
+                        // Add results to array  
+                        console.log(j + " == " + numberOfCheckins);
+                        jsonObject["BusinessDetails"].push({"businessName": businessName, "numOfPeople": numOfPeople, "averageAge": averageAge, "numOfFemales": numOfFemales, "numOfMales": numOfMales });
+                        
+                    
+                        console.log(jsonObject); 
+                    });
+                }
+            });
+        }
+        res.json(jsonObject);
+    });
 });
 
 
