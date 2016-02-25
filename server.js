@@ -137,7 +137,7 @@ app.post('/updateLocation', function(req, res) {
 // Returns a list of hotspots around the users location
 app.post('/gethotspots', function(req, res) {
 
-    function calculateCheckinsPerLocation(ageArray, genderArray ,averageAge ,businessName ,data, iteration ,callback) {
+    function calculateCheckinsPerLocation(x, y, ageArray, genderArray ,averageAge ,businessName ,data, iteration ,callback) {
         var getAgeAndGenderQuery = "SELECT gender, age FROM users WHERE user_id = " + data[iteration].user_id + ";";
         connection.query(getAgeAndGenderQuery, function(err, rows) {
 
@@ -156,204 +156,125 @@ app.post('/gethotspots', function(req, res) {
                 if (genderArray[a] == 'M') numOfMales++; 
                 if (genderArray[a] == 'F') numOfFemales++; 
                 sum += ageArray[a];
-            }
-                        
-            averageAge = (sum / ageArray.length); 
+            }   
+            
+            averageAge = Math.round((sum / ageArray.length)); 
 
-            var obj = {
-                "businessName": businessName, 
-                "numOfPeople": numOfPeople, 
-                "averageAge": averageAge, 
-                "numOfFemales": numOfFemales, 
-                "numOfMales": numOfMales 
-            }; 
+            var percentFemale =  Math.round(100 * (numOfFemales / (numOfFemales + numOfMales))); 
+            var percentMale = Math.round(100 * (numOfMales / (numOfFemales + numOfMales))); 
 
-            if (err) 
+            var obj = {  
+                "coordinates" : {
+                    "x": x, 
+                    "y": y
+                }, 
+                "business_details" : {
+                    "business_name": businessName, 
+                    "num_of_people": numOfPeople, 
+                    "average_age": averageAge, 
+                    "num_of_females": numOfFemales, 
+                    "num_of_males": numOfMales, 
+                    "percent_female": percentFemale, 
+                    "percent_male": percentMale
+                }
+             }; 
+
+            if (err) {
                 callback(err, null, null)
-            else 
+            }
+            else {
                 callback(null, obj, iteration); 
+            }
         }); 
     }
 
-    function getCheckinsForEachLocation(businessName, data, iterationI, callback) {
+    function getCheckinsForEachLocation(x, y, businessName, data, iterationI, callback) {
         var retrieveLocationsWithCheckinsQuery = "SELECT * FROM checkins WHERE location_id = " + data[iterationI].location_id +  " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) <= 10;";
         connection.query(retrieveLocationsWithCheckinsQuery, function(err, rows) {
-
+            console.log("Business checkin number: " + iterationI);
             var averageAge = 0; 
             var genderArray = [];
             var ageArray = [];
+            /*
+            if (rows.length == 0) {
+                console.log("No results");
+                callback(null, null, iterationI);
+            } else {
+            */ 
 
             for(var j = 0; j < rows.length; j++) {
-                    
+             
                 console.log("J " + j); 
                 
-                calculateCheckinsPerLocation(ageArray, genderArray, averageAge, businessName ,rows, j, function(err, result, iteration) {
+                calculateCheckinsPerLocation(x, y, ageArray, genderArray, averageAge, businessName ,rows, j, function(err, obj, iteration) {
                     if (err) {
                         callback(err, null, iteration); 
                     }
 
                     if (rows.length - 1 == iteration) {
-                        callback(null, result, iterationI);
+                        callback(null, obj, iterationI);
                     }
                 }); 
             }
+        //}
         }); 
     }
 
-    function retrieveLocation(jsonObject, callback) {
+    function retrieveLocation(callback) {
         var locationsWithinVisibleMapRectQuery = "SELECT * FROM locations WHERE Y(coordinates) > " + req.body.SWCoordLat + "AND Y(coordinates) < " + req.body.NECoordLat + "AND X(coordinates) > " + req.body.SWCoordLong + "AND X(coordinates) < " + req.body.NECoordLong + ";";
         connection.query(locationsWithinVisibleMapRectQuery, function(err, rows) {
             if (err) throw err; 
 
-            console.log("Number of businesses " + rows.length );
+            var jsonObject = {
+                "results" : []
+            };
+            console.log("Number of businesses: " + rows.length);
             for(var i = 0; i < rows.length; i++) {
                 
                 console.log("Business number " + i); 
                 var businessName = rows[i].name;
                 console.log(businessName);
-
-            
-                getCheckinsForEachLocation(businessName, rows, i, function(err, result, iterationI) {
+                console.log()
+                var x = rows[i].coordinates.x; 
+                var y = rows[i].coordinates.y; 
+                
+                getCheckinsForEachLocation(x, y, businessName, rows, i, function(err, obj, iterationI) {
+                    
                     if (err) {
-                        callback(err, null, null); 
-                    } else {
-                        if (rows.length[i] == iterationI) 
-                            console.log("Added");
-                            jsonObject["BusinessDetails"].push(result);
+                        callback(err, null); 
+                    }           
 
-                        if (rows.length - 1 == iterationI)
-                            callback(null, result, iterationI, jsonObject);
-                    }
+                
+                    jsonObject["results"].push(obj);
+                    callback(null, jsonObject, iterationI);
+                    //console.log("length of json object: " + jsonObject["results"].length);
+                    
+                    // iterationI is the number of the results processed 
+                    // Rows.length are the number of businesses on the visible map rect 
+                    // Must return results at end of each iteration 
+                    
+                    //console.log((jsonObject["results"].length) + " ==  row length: " + rows.length) ; 
+                    /*
+                    var diff = rows.length - jsonObject["results"].length ; 
+                    console.log(diff);
+                    console.log((rows.length) + " ==  " + (jsonObject["results"].length  + diff)) ; 
+                    if ((rows.length ) == jsonObject["results"].length + diff) {
+                        console.log("Called");
+                        callback(null, jsonObject, iterationI);            
+                    } 
+                    */ 
+                     
                 }); 
             }
         }); 
     }
     
-    var jsonObject = {
-         "BusinessDetails" : []
-    };
-
-    retrieveLocation(jsonObject, function(err, result, IterationI, jsonObject) {
-        
-            
-        console.log(jsonObject);
-         
-        res.json(jsonObject);
-        
-    });
-
-    
-    
-
-    //var locationsWithinVisibleMapRectQuery = "SELECT * FROM locations WHERE Y(coordinates) > " + req.body.SWCoordLat + "AND Y(coordinates) < " + req.body.NECoordLat + "AND X(coordinates) > " + req.body.SWCoordLong + "AND X(coordinates) < " + req.body.NECoordLong + ";";
-
-    /*
-function getLocationsInMapView(callback) {
-        var locationsWithinVisibleMapRectQuery = "SELECT * FROM locations WHERE Y(coordinates) > " + req.body.SWCoordLat + "AND Y(coordinates) < " + req.body.NECoordLat + "AND X(coordinates) > " + req.body.SWCoordLong + "AND X(coordinates) < " + req.body.NECoordLong + ";";
-        connection.query(locationsWithinVisibleMapRectQuery, function(err, rows, fields) {
-                if (err) {
-                    callback(err, null);
-                } else {
-                    callback(null, rows);
-                }  
-        });
-    }
-
-    getLocationsInMapView(function(err, result) {
-        for(var i = 0; i < result.length; i++) {
-            console.log(result[i].name);
-        }
-    });
-    
-    
-    // NE TOP RIGHT
-    // SW BOTTOM LEFT
-    // X IS LONG
-    // Y IS LAT
-    //console.log("NElat: " + req.body.NECoordLat + ", NElong: " + req.body.NECoordLong); // TOP RIGHT 
-    //console.log("SWlat: " + req.body.SWCoordLat + ", SWlong: " + req.body.SWCoordLong); // LEFT BOTTOM
-
-    var jsonObject = {
-        "BusinessDetails" : []
-    };
-    // Retrieve locations within the visible map rect 
-    var locationsWithinVisibleMapRectQuery = "SELECT * FROM locations WHERE Y(coordinates) > " + req.body.SWCoordLat + "AND Y(coordinates) < " + req.body.NECoordLat + "AND X(coordinates) > " + req.body.SWCoordLong + "AND X(coordinates) < " + req.body.NECoordLong + ";";
-    connection.query(locationsWithinVisibleMapRectQuery, function(err, rows, fields) {
+    retrieveLocation(function(err, jsonObject, iterationI) {
         if (err) throw err; 
-        console.log("Locations in map: " + rows.length);
-        for (var i = 0; i < rows.length; i++) {
-            var businessName = rows[i].name;
-            console.log("I: " + i);
-            // Returns all checkins for a location within the last 10 minutes
-            var retrieveLocationsWithCheckinsQuery = "SELECT * FROM checkins WHERE location_id = " + rows[i].location_id +  " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) <= 10;"; 
-            connection.query(retrieveLocationsWithCheckinsQuery, function(err, rows, fields) {
-
-                var averageAge = 0; 
-                var numOfFemales = 0; 
-                var numOfMales = 0;
-                var numOfPeople = rows.length; 
-                var genderArray = [];
-                var ageArray = [];
-    
-                //console.log("Check ins for each location: " + rows.length);
-                //console.log("Location number: " + i);
-
-                for (var j = 0; j < rows.length; j++) {
-                    console.log("J: " + j);
-                    
-                    console.log("Check-in: " + j + " User id: " + rows[j].user_id +  " location_id: " + rows[j].location_id + " entered_at: " + rows[j].entered_at);
-                    
-                    function calculateCheckins(callback) {
-                    var getAgeAndGenderQuery = "SELECT gender, age FROM users WHERE user_id = " + rows[j].user_id + ";"; 
-                    connection.query(getAgeAndGenderQuery, function(err, rows, fields) {
-                        if (err) throw err; 
-                        for (var z = 0; z < rows.length; z++) {
-                            //console.log("Z: " + z);
-                            numOfFemales = 0;  
-                            numOfMales = 0; 
-                            //console.log("Gender: " + rows[z].gender + " and Age: " + rows[z].age); 
-                            genderArray.push(rows[z].gender); 
-                            ageArray.push(rows[z].age); 
-                        }
-
-                        //console.log("gend length: " + genderArray.length);
-                        //console.log("age length: "  + ageArray.length);
-                        var sum = 0; 
-                        for (var a = 0; a < ageArray.length; a++) {
-                            //console.log( "Age array index : " +  a + " : " +  ageArray[a]);
-                            if (genderArray[a] == 'M') numOfMales++; 
-                            if (genderArray[a] == 'F') numOfFemales++; 
-                            sum += ageArray[a];
-                        }
-                        //console.log("Sum:" + sum);
-                        averageAge = (sum / ageArray.length); 
-
-                        //console.log("Total number of people: " + numOfPeople);
-                        //console.log("The average age is: " + averageAge); 
-                        //console.log("Males: " + numOfMales);
-                        //console.log("Females: " + numOfFemales); 
-                        
-                        // Add results to array  
-                        //console.log(j + " == " + numberOfCheckins);
-                        callback({"businessName": businessName, "numOfPeople": numOfPeople, "averageAge": averageAge, "numOfFemales": numOfFemales, "numOfMales": numOfMales });
-                        
-                    });
-
-                    calculateCheckins(function(result) {
-                        console.log("Result " + result);
-                        jsonObject["BusinessDetails"].push(result);
-                    });
-
-                    console.log(jsonObject["BusinessDetails"]);
-                }
-
-
-                }
-            });
-        }
-        res.json(jsonObject);
+        console.log(jsonObject["results"]); 
+        //res.send(jsonObject);
     });
-    */ 
+       
 });
 
 
