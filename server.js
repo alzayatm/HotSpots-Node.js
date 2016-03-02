@@ -100,14 +100,15 @@ app.post('/updateLocation', function(req, res) {
                                 for (var j = 0; j < json.results[i].types.length; j++) {
 
                                     var typeOfLocation = json.results[i].types[j];
-                                    if (typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation != "political") {
+                                    if (typeOfLocation != "route" && typeOfLocation != "locality" && typeOfLocation != "political" && typeOfLocation != "neighborhood") {
 
                                         var longitude = json.results[i].geometry.location.lng; 
                                         var latitude = json.results[i].geometry.location.lat; 
+                                        var address = json.results[i].vicinity.replace(/'+/g, ""); 
                                         var name = json.results[i].name.replace(/'+/g, ""); 
 
                                         // Add the location query 
-                                        var addLocationQuery = "INSERT INTO locations (coordinates, name) VALUES(POINT(" + longitude + "," + latitude + "),\'" + name + "\');";
+                                        var addLocationQuery = "INSERT INTO locations (coordinates, name, address) VALUES(POINT(" + longitude + "," + latitude + "),\'" + name + "\', \'" + address  + "\');";
                                         connection.query(addLocationQuery, function(err, rows, fields) { if (err) throw err; });
 
                                         // Retrieve the ID of the location and add the user 
@@ -137,7 +138,7 @@ app.post('/updateLocation', function(req, res) {
 // Returns a list of hotspots around the users location
 app.post('/gethotspots', function(req, res) {
 
-    function calculateCheckinsPerLocation(x, y, ageArray, genderArray ,averageAge ,businessName ,data, iteration ,callback) {
+    function calculateCheckinsPerLocation(businessAddress, x, y, ageArray, genderArray ,averageAge ,businessName ,data, iteration ,callback) {
         var getAgeAndGenderQuery = "SELECT gender, age FROM users WHERE user_id = " + data[iteration].user_id + ";";
         connection.query(getAgeAndGenderQuery, function(err, rows) {
 
@@ -170,6 +171,7 @@ app.post('/gethotspots', function(req, res) {
                 }, 
                 "business_details" : {
                     "business_name": businessName, 
+                    "business_address": businessAddress,
                     "num_of_people": numOfPeople, 
                     "average_age": averageAge, 
                     "num_of_females": numOfFemales, 
@@ -188,36 +190,35 @@ app.post('/gethotspots', function(req, res) {
         }); 
     }
 
-    function getCheckinsForEachLocation(x, y, businessName, data, iterationI, callback) {
+    function getCheckinsForEachLocation(businessAddress, x, y, businessName, data, iterationI, callback) {
         var retrieveLocationsWithCheckinsQuery = "SELECT * FROM checkins WHERE location_id = " + data[iterationI].location_id +  " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) <= 10;";
         connection.query(retrieveLocationsWithCheckinsQuery, function(err, rows) {
-            console.log("Business checkin number: " + iterationI);
+    
             var averageAge = 0; 
             var genderArray = [];
             var ageArray = [];
-            /*
+            
             if (rows.length == 0) {
-                console.log("No results");
-                callback(null, null, iterationI);
+                callback(null, null);
             } else {
-            */ 
 
-            for(var j = 0; j < rows.length; j++) {
-             
-                console.log("J " + j); 
+                for(var j = 0; j < rows.length; j++) {
                 
-                calculateCheckinsPerLocation(x, y, ageArray, genderArray, averageAge, businessName ,rows, j, function(err, obj, iteration) {
-                    if (err) {
-                        callback(err, null, iteration); 
-                    }
+                    console.log("J " + j); 
+                
+                    calculateCheckinsPerLocation(businessAddress, x, y, ageArray, genderArray, averageAge, businessName ,rows, j, function(err, obj, iteration) {
+                        if (err) {
+                            callback(err, null); 
+                        }
 
-                    if (rows.length - 1 == iteration) {
-                        callback(null, obj, iterationI);
-                    }
-                }); 
+                        if (rows.length - 1 == iteration) {
+                            callback(null, obj);
+                        }
+                    }); 
+                }
             }
-        //}
         }); 
+
     }
 
     function retrieveLocation(callback) {
@@ -228,53 +229,44 @@ app.post('/gethotspots', function(req, res) {
             var jsonObject = {
                 "results" : []
             };
+
             console.log("Number of businesses: " + rows.length);
+            
             for(var i = 0; i < rows.length; i++) {
-                
+               
                 console.log("Business number " + i); 
                 var businessName = rows[i].name;
+                var businessAddress = rows[i].address; 
                 console.log(businessName);
-                console.log()
+                console.log(businessAddress);
+                console.log();
                 var x = rows[i].coordinates.x; 
                 var y = rows[i].coordinates.y; 
                 
-                getCheckinsForEachLocation(x, y, businessName, rows, i, function(err, obj, iterationI) {
+                getCheckinsForEachLocation(businessAddress, x, y, businessName, rows, i, function(err, obj) {
                     
                     if (err) {
                         callback(err, null); 
-                    }           
-
+                    }  
                 
                     jsonObject["results"].push(obj);
-                    callback(null, jsonObject, iterationI);
-                    //console.log("length of json object: " + jsonObject["results"].length);
-                    
-                    // iterationI is the number of the results processed 
-                    // Rows.length are the number of businesses on the visible map rect 
-                    // Must return results at end of each iteration 
-                    
-                    //console.log((jsonObject["results"].length) + " ==  row length: " + rows.length) ; 
-                    /*
-                    var diff = rows.length - jsonObject["results"].length ; 
-                    console.log(diff);
-                    console.log((rows.length) + " ==  " + (jsonObject["results"].length  + diff)) ; 
-                    if ((rows.length ) == jsonObject["results"].length + diff) {
-                        console.log("Called");
-                        callback(null, jsonObject, iterationI);            
-                    } 
-                    */ 
-                     
+
+                    console.log(jsonObject["results"].length  + " == " + rows.length);
+                    if(jsonObject["results"].length == rows.length) { 
+                        console.log("here"); 
+                        callback(null, jsonObject);  
+                     }
                 }); 
             }
         }); 
     }
-    
-    retrieveLocation(function(err, jsonObject, iterationI) {
+
+    retrieveLocation(function(err, jsonObject) {
         if (err) throw err; 
-        console.log(jsonObject["results"]); 
-        //res.send(jsonObject);
+        console.log("===== FINAL RESULT ====="); 
+        console.log(jsonObject["results"]);
+        res.json(jsonObject);
     });
-       
 });
 
 
@@ -283,9 +275,30 @@ app.post('/gethotspots', function(req, res) {
 app.get('/search', function(req, res) {
     // Returning a specific location and the information about it
     // Might need to send information about the particular business requested 
+    // Send long and lat, search within distance, and return calculated results for searched results
     res.status(200).json({"name": "Mihad"});
 
 
+});
+
+app.post('/updateAge', function(req, res) {
+
+    var changeAgeQuery = "UPDATE users SET age = " + req.body.age + " WHERE user_id = " + req.body.userID + ";"; 
+    connection.query(changeAgeQuery, function(err, rows) {
+        if (err) throw err; 
+
+        res.status(200);
+    }); 
+});
+
+app.post('/updateGender', function(req, res) {
+
+    var updateGenderQuery = "UPDATE users SET gender = " + req.body.gender + " WHERE user_id = " + req.body.userID + ";"; 
+    connection.query(updateGenderQuery, function(err, rows) {
+        if (err) throw err; 
+
+        res.status(200);
+    });
 });
 
 // Start server 
