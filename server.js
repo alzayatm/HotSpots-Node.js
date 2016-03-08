@@ -48,27 +48,31 @@ app.post('/register', function(req, res) {
 
 app.post('/updateLocation', function(req, res) {
     
+    console.log(req.body.longitude);
+    console.log(req.body.latitude);
     var proceedToUpdateUsersLocation = true
-
-    var checkIfDuplicateQuery = "SELECT * FROM checkins WHERE user_id = " + req.body.userID + " AND TIMESTAMPDIFF(SECOND, entered_at, current_timestamp) < 5;";
+    // " AND entered_at <= now() AND entered_at > now()-50;"
+    // AND entered_at <= now() AND entered_at >= date_sub(now(),  interval 1 SECOND);
+    // AND DATE_SUB(entered_at, INTERVAL 3.999999 SECOND_MICROSECOND);
+    var checkIfDuplicateQuery = "SELECT * FROM checkins WHERE user_id = " + req.body.userID + " AND DATE_SUB(curtime(6), INTERVAL 4.03000 SECOND_MICROSECOND) < entered_at;";    //TIMESTAMPDIFF(SECOND, entered_at, current_timestamp(6)) < 5;";
     connection.query(checkIfDuplicateQuery, function(err, rows, fields) {
         if (err) throw err; 
-        /*
-        console.log("Update rows: "+ rows.length);
-        for(var i = 0; i < rows.length; i++) {
-            console.log(rows[i].checkin_id);
-        }
-        */ 
-        if (rows.length > 0) proceedToUpdateUsersLocation = false; // A duplicate record exists, do not update table
+        
+        console.log("Value of rows.length: " + rows.length);
+        if (rows.length > 0) 
+            proceedToUpdateUsersLocation = false; // A duplicate record exists, do not update table
 
+        console.log("Value of proceed to update: " + proceedToUpdateUsersLocation);
         if (proceedToUpdateUsersLocation) {
-
+            
             // Check if closest location exists in locations table 
             var queryClosestLocation = "SELECT * FROM locations WHERE ST_Distance_Sphere(POINT(" + req.body.longitude + "," + req.body.latitude + "), coordinates) <= 20;";
             connection.query(queryClosestLocation, function(err, rows, fields) {
                 if (err) throw err; 
                 // If rows.length > 0, the location closest to the user exists in the table 
                 if (rows.length > 0) {
+                    console.log("Location already exists in table");
+                    console.log("Number of existing locations already in table: " + rows.length);
                     // Retrieve the location ID 
                     var locationID = rows[0].location_id; 
                     // Make a query to add the user to that location 
@@ -76,6 +80,7 @@ app.post('/updateLocation', function(req, res) {
                     connection.query(addUserToLocationQuery, function(err, rows, fields) { if (err) throw err; })
                 } else {
                     // The location does not exist in the table, we make a call to google api for that location 
+                    console.log("Location does not exist, fetching from google api");
                     var options = {
                         method: "GET",
                         host: "maps.googleapis.com", 
@@ -132,6 +137,7 @@ app.post('/updateLocation', function(req, res) {
                 }
             });
         }
+        res.status(200).end();
     });
 }); 
 
@@ -191,7 +197,7 @@ app.post('/gethotspots', function(req, res) {
     }
 
     function getCheckinsForEachLocation(businessAddress, x, y, businessName, data, iterationI, callback) {
-        var retrieveLocationsWithCheckinsQuery = "SELECT * FROM checkins WHERE location_id = " + data[iterationI].location_id +  " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) <= 10;";
+        var retrieveLocationsWithCheckinsQuery = "SELECT * FROM checkins WHERE location_id = " + data[iterationI].location_id +  " AND TIMESTAMPDIFF(MINUTE, entered_at, current_timestamp) < 10;";
         connection.query(retrieveLocationsWithCheckinsQuery, function(err, rows) {
     
             var averageAge = 0; 
@@ -231,32 +237,36 @@ app.post('/gethotspots', function(req, res) {
             };
 
             console.log("Number of businesses: " + rows.length);
-            
-            for(var i = 0; i < rows.length; i++) {
+            if (rows.length == 0) {
+                callback(null, null);
+            } else {
+                for(var i = 0; i < rows.length; i++) {
                
-                console.log("Business number " + i); 
-                var businessName = rows[i].name;
-                var businessAddress = rows[i].address; 
-                console.log(businessName);
-                console.log(businessAddress);
-                console.log();
-                var x = rows[i].coordinates.x; 
-                var y = rows[i].coordinates.y; 
+                    console.log("Business number " + i); 
+                    var businessName = rows[i].name;
+                    var businessAddress = rows[i].address; 
+                    console.log(businessName);
+                    console.log(businessAddress);
+                    console.log();
+                    var x = rows[i].coordinates.x; 
+                    var y = rows[i].coordinates.y; 
                 
-                getCheckinsForEachLocation(businessAddress, x, y, businessName, rows, i, function(err, obj) {
+                    getCheckinsForEachLocation(businessAddress, x, y, businessName, rows, i, function(err, obj) {
                     
-                    if (err) {
-                        callback(err, null); 
-                    }  
+                        if (err) {
+                            callback(err, null); 
+                        }  
                 
-                    jsonObject["results"].push(obj);
+                        jsonObject["results"].push(obj);
 
-                    console.log(jsonObject["results"].length  + " == " + rows.length);
-                    if(jsonObject["results"].length == rows.length) { 
-                        console.log("here"); 
-                        callback(null, jsonObject);  
-                     }
-                }); 
+                        console.log(jsonObject["results"].length  + " == " + rows.length);
+                        console.log(jsonObject["results"]);
+                        if (jsonObject["results"].length == rows.length) { 
+                            callback(null, jsonObject);  
+                         } 
+
+                    }); 
+                }
             }
         }); 
     }
@@ -264,8 +274,14 @@ app.post('/gethotspots', function(req, res) {
     retrieveLocation(function(err, jsonObject) {
         if (err) throw err; 
         console.log("===== FINAL RESULT ====="); 
-        console.log(jsonObject["results"]);
-        res.json(jsonObject);
+        if (jsonObject == null) {
+            console.log("No data to send back");
+            res.status(200).end();
+        } else {
+            console.log("Data sent back");
+            console.log(jsonObject["results"]);
+            res.json(jsonObject).status(200).end();
+        }
     });
 });
 
@@ -277,27 +293,25 @@ app.get('/search', function(req, res) {
     // Might need to send information about the particular business requested 
     // Send long and lat, search within distance, and return calculated results for searched results
     res.status(200).json({"name": "Mihad"});
-
-
 });
 
-app.post('/updateAge', function(req, res) {
+app.post('/updateage', function(req, res) {
 
     var changeAgeQuery = "UPDATE users SET age = " + req.body.age + " WHERE user_id = " + req.body.userID + ";"; 
     connection.query(changeAgeQuery, function(err, rows) {
         if (err) throw err; 
-
         res.status(200);
+        res.end();
     }); 
 });
 
-app.post('/updateGender', function(req, res) {
+app.post('/updategender', function(req, res) {
 
-    var updateGenderQuery = "UPDATE users SET gender = " + req.body.gender + " WHERE user_id = " + req.body.userID + ";"; 
+    var updateGenderQuery = "UPDATE users SET gender = \'" + req.body.gender + "\' WHERE user_id = " + req.body.userID + ";"; 
     connection.query(updateGenderQuery, function(err, rows) {
         if (err) throw err; 
-
         res.status(200);
+        res.end();
     });
 });
 
