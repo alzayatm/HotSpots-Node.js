@@ -13,13 +13,25 @@ var modules = require('./modules');
 var app = express();
 
 // MySQL 
+
+// NOTE UNCOMMENT THIS FOR LOCAL DEVELOPMENT
+/*
 var connection = mysql.createConnection({
         host     : 'localhost',
         user     : 'root',
         password : 'Twelve20',
         database : 'HotSpots'
     });
+*/
 
+
+var connection = mysql.createConnection({
+        host     : 'prod-rds.hotspotsapp.us',
+        user     : 'root',
+        password : 'Twelve20',
+        database : 'HotSpots'
+    });
+    
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.use(expressJWT({ secret: '4949Now' }).unless({ path: ['/register']}));
